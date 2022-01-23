@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Fourier</title>
+  <script type="text/javascript" src="math.js"></script>
+  <script type="text/javascript">
+    class State {
+      constructor() {
+        this.state = "BUILDING"
+        this.input_mode = undefined
+        this.input_func = undefined
+        this.svg_dom = undefined
+        this.svg_pieces = undefined
+        this.fourier_params = undefined
+        this.real_t = undefined
+        this.scaled_t = undefined
+        this.t_start = undefined
+        this.t_end = undefined
+        this.t_rate = undefined
+        this.num_series = undefined
+        this.delta_t = undefined
+        this.max = undefined
+      }
+      set_t_start(t_start) {
+        this.t_start = math.evaluate(t_start)
+      }
+      set_t_end(t_end) {
+        this.t_end = math.evaluate(t_end)
+      }
+      set_t_rate(t_rate) {
+        this.t_rate = math.evaluate(t_rate)
+      }
+      set_num_series(num_series) {
+        this.num_series = Math.floor(parseInt(num_series) / 2) * 2 + 1
+      }
+      set_delta_t(delta_t) {
+        this.delta_t = parseFloat(delta_t)
+      }
+      estimate_fourier() {
+        this.fourier_params = new Map()
+        var init_ft = true
+        var fts = new Map()
+        var max = 0
+        for (let i = 0; i < this.num_series; i++) {
+          var n = i - Math.floor(this.num_series / 2)
+          let sum = math.complex()
+          var common_exponent_terms = -2 * Math.PI * n
+          for (let a = 0; a < 1; a += this.delta_t) {
+            var t = this.t_start + a * (this.t_end - this.t_start)
+            let ft;
+            if (init_ft) {
+              ft = this.current_point(t)
+              fts.set(a, ft)
+              max = Math.max(Math.abs(math.im(ft)), Math.abs(math.re(ft)), max)
+            } else {
+              ft = fts.get(a)
+            }
+            var exponent = (common_exponent_terms * a)
+            var c2 = math.complex(this.delta_t * Math.cos(exponent), this.delta_t * Math.sin(exponent))
+            var val = math.multiply(ft, c2)
+            sum = math.add(sum, val)
+          }
+          this.fourier_params.set(n, sum)
+          init_ft = false
+        }
+        this.max = max
+        console.log(this.fourier_params)
+      }
+      async process_svg(text) {
+        DomProxy.svg_div.style = ""
+        this.svg_dom = (new DOMParser).parseFromString(text, "image/svg+xml").documentElement
+        this.svg_dom.style="width:800px; height:auto"
+        DomProxy.svg_container.append(this.svg_dom)
+
+        this.input_mode = "SVG"
+        this.svg_pieces = []
+        var total_length = 0
+        for (var el of this.svg_dom.querySelectorAll("*")) {
+          if (el instanceof SVGGeometryElement) {
+            var len = el.getTotalLength()
+            var start = total_length
+            var end = start + len
+            this.svg_pieces.push({start: start, end: end, el: el})
+            total_length += len
+          }
+        }
+        this.t_start = 0
+        this.t_end = total_length
+        this.t_rate = this.t_end / 10
+        DomProxy.t_start.value = this.t_start
+        DomProxy.t_end.value = this.t_end
+        DomProxy.t_rate.value = this.t_rate
+        this.estimate_fourier()
+        this.state = "DONE"
+
+      }
+      async set_uploaded_file(file) {
+        await file.text().then(text => this.process_svg(text))
+      }
+      async set_svg_path(svg_path) {
+        await fetch(svg_path)
+          .then(response => response.text())
+          .then(text => this.process_svg(text))
+      }
+      set_input_func(function_text) {
+        this.input_mode = "FUNC"
+        this.input_func = math.compile(function_text)
+        this.estimate_fourier()
+        this.state = "DONE"
+      }
+      reset_t() {
+        this.real_t = undefined
+        this.scaled_t = undefined
+      }
+      advance_t(new_time) {
+        // ms -> s
+        new_time /= 1000
+        if (this.real_t === undefined) {
+          this.real_t = new_time
+          this.scaled_t = this.t_start
+        } else {
+          let real_time_advance = new_time - this.real_t
+          this.real_t = new_time
+          this.scaled_t += (real_time_advance) * this.t_rate
+          while (this.scaled_t > this.t_end) {
+            this.scaled_t -= this.t_end - this.t_start
+          }
+        }
+        DomProxy.t.value = this.scaled_t
+      }
+      t() {
+        return this.scaled_t
+      }
+      i() {
+        return (this.scaled_t - this.t_start) / (this.t_end - this.t_start)
+      }
+      current_fourier_approx() {
+        let sum = math.complex()
+        var expr = math.compile("c * e ^ (2 * pi * i * n * t)")
+        for (let i = 0; i < this.num_series; i++) {
+          var n = i - Math.floor(this.num_series / 2)
+          var c = this.fourier_params.get(n)
+          var val = expr.evaluate({c: c, n: n, t: this.i()})
+          sum = math.add(sum, val)
+        }
+        return sum
+      }
+      current_point(t) {
+        if (t === undefined) {
+          t = this.t()
+        }
+        if (this.input_mode == "FUNC")
+          return math.complex(this.input_func.evaluate({t: t}))
+        else {
+          for (let el of this.svg_pieces) {
+            if (t > el.end) {
+              continue
+            }
+            var point = el.el.getPointAtLength(t - el.start)
+            return math.complex(point.x, point.y)
+          }
+        }
+        console.log("Nothing matched in current_point!")
+        debugger;
+        return
+      }
+    }
+
+    const DomProxy = new Proxy(Object.freeze({}), {
+      get: function(target, prop, receiver) {
+        return document.getElementById(prop)
+      }
+    })
+    const ZOOM_BASE = 1.5
+    function calc_zoom(val) {
+      let float = parseFloat(val)
+      if (float < 0) {
+        float = ZOOM_BASE ** float
+      }
+      return float
+    }
+    function append_point(history, point) {
+      history.push(point)
+      while (history.length > HISTORY_LEN) {
+        history.shift()
+      }
+    }
+    function draw_graph(context, width, height, zoom, view_width, view_height) {
+      context.clearRect(0, 0, width, height)
+      context.strokeRect(0, 0, width, height)
+      context.setTransform(zoom, 0, 0, zoom, width/2, height/2)
+      context.beginPath()
+      context.moveTo(-view_width/2, -CENTER_Y)
+      context.lineTo(view_width/2, -CENTER_Y)
+      context.moveTo(-CENTER_X, -view_height/2)
+      context.lineTo(-CENTER_X, view_height/2)
+      context.stroke()
+    }
+    let STATE;
+    var time_plot_ctx;
+    var fourier_ctx;
+    var anim_frame;
+    var time_tail = []
+    var fourier_tail = []
+    var HISTORY_LEN = 100
+    var CENTER_X = 0
+    var CENTER_Y = 0
+    var FOLLOW = false
+    function draw_plot(ts) {
+      //console.log("Drawing...")
+      STATE.advance_t(ts)
+      if (STATE.state == "DONE") {
+        const WIDTH = DomProxy.time_plot.width
+        const HEIGHT = DomProxy.time_plot.height
+        const ZOOM = calc_zoom(DomProxy.zoom_text.value)
+        const VIEW_WIDTH = WIDTH / ZOOM
+        const VIEW_HEIGHT = HEIGHT / ZOOM
+        const DOT_RAD = Math.min(VIEW_HEIGHT / 240, VIEW_WIDTH / 240)
+        var val = STATE.current_point()
+        if (FOLLOW) {
+          CENTER_X = Math.round(math.re(val))
+          CENTER_Y = Math.round(math.im(val))
+          DomProxy.graph_x.value = CENTER_X
+          DomProxy.graph_y.value = CENTER_Y
+        }
+        draw_graph(time_plot_ctx, WIDTH, HEIGHT, ZOOM, VIEW_WIDTH, VIEW_HEIGHT)
+        append_point(time_tail, val)
+        for (let el of time_tail) {
+          time_plot_ctx.beginPath()
+          time_plot_ctx.arc(math.re(el) - CENTER_X, math.im(el) - CENTER_Y, DOT_RAD, 0, Math.PI * 2)
+          time_plot_ctx.stroke()
+        }
+        time_plot_ctx.setTransform(1, 0, 0, 1, 0, 0)
+        draw_graph(fourier_ctx, WIDTH, HEIGHT, ZOOM, VIEW_WIDTH, VIEW_HEIGHT)
+        var fourier = STATE.current_fourier_approx()
+        append_point(fourier_tail, fourier)
+        for (let el of fourier_tail) {
+          fourier_ctx.beginPath()
+          fourier_ctx.arc(math.re(el) - CENTER_X, math.im(el) - CENTER_Y, DOT_RAD, 0, Math.PI * 2)
+          fourier_ctx.stroke()
+        }
+        fourier_ctx.setTransform(1, 0, 0, 1, 0, 0)
+      }
+      anim_frame = window.requestAnimationFrame(draw_plot)
+    }
+    function stop() {
+      if (anim_frame !== undefined) {
+        window.cancelAnimationFrame(anim_frame)
+        anim_frame = undefined
+      }
+    }
+    function play() {
+      stop()
+      anim_frame = window.requestAnimationFrame(draw_plot)
+    }
+    function reset_t() {
+      STATE.reset_t()
+    }
+    var LAST_WHEEL = 0
+    const WHEEL_MIN_INTERVAL = 100
+    function handle_wheel(e) {
+      e.preventDefault()
+      var ts = e.timeStamp
+      if (ts - LAST_WHEEL > WHEEL_MIN_INTERVAL) {
+        LAST_WHEEL = ts
+        if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+          return
+        }
+        var zoom = parseFloat(DomProxy.zoom_text.value)
+        if (e.deltaY > 0) {
+          zoom -= 1
+
+        } else if (e.deltaY < 0) {
+          zoom += 1
+        }
+        DomProxy.zoom_text.value = zoom
+        DomProxy.zoom.value = zoom
+      }
+    }
+    function update_t() {
+      // TODO
+    }
+    function set_zoom_to_suggested() {
+      const WIDTH = DomProxy.time_plot.width
+      const HEIGHT = DomProxy.time_plot.height
+      const MIN = Math.min(WIDTH, HEIGHT)
+      var max_ft = STATE.max * 1.4
+      var zoom;
+      if (MIN < max_ft) {
+        zoom = Math.log(MIN/max_ft) / Math.log(ZOOM_BASE)
+      } else {
+        zoom = MIN / max_ft
+      }
+      zoom = Math.sign(zoom) * Math.ceil(Math.abs(zoom))
+      DomProxy.zoom_text.value = zoom
+      DomProxy.zoom.value = zoom
+      CENTER_X = 0
+      CENTER_Y = 0
+      DomProxy.graph_x.value = 0
+      DomProxy.graph_y.value = 0
+    }
+    function handle_pointermove(e) {
+      e.preventDefault()
+      var x = e.movementX
+      var y = e.movementY
+      const ZOOM = calc_zoom(DomProxy.zoom_text.value)
+      // 1 = primary button
+      if (e.buttons & 1) {
+        CENTER_X = Math.round(CENTER_X - x / ZOOM)
+        CENTER_Y = Math.round(CENTER_Y - y / ZOOM)
+        DomProxy.graph_x.value = CENTER_X
+        DomProxy.graph_y.value = CENTER_Y
+      }
+    }
+    function remove_children(node) {
+      while (node.firstChild) {
+        node.removeChild(node.firstChild)
+      }
+    }
+    async function reinit(e) {
+      stop()
+      STATE = new State()
+      time_tail =[]
+      fourier_tail = []
+      DomProxy.svg_div.style = "display: none"
+      remove_children(DomProxy.svg_container)
+      STATE.set_t_start(DomProxy.t_start.value)
+      STATE.set_t_end(DomProxy.t_end.value)
+      STATE.set_t_rate(DomProxy.t_rate.value)
+      STATE.set_num_series(DomProxy.num_series.value)
+      STATE.set_delta_t(DomProxy.delta_t.value)
+      STATE.reset_t()
+      if (DomProxy.svg_input_radio.checked) {
+        await STATE.set_svg_path(DomProxy.svg_src.value)
+      } else if (DomProxy.func_input_radio.checked) {
+        STATE.set_input_func(DomProxy.input_func.value)
+      } else {
+        await STATE.set_uploaded_file(DomProxy.file_input.files[0])
+      }
+      var param_container = DomProxy.param_container
+      remove_children(param_container)
+      for (const [key, value] of STATE.fourier_params) {
+        var new_node = document.createElement("code")
+        new_node.textContent = String.prototype.concat("Frequency ", key,": ", value, "; ")
+        param_container.append(new_node)
+      }
+      play()
+    }
+    function onload() {
+      time_plot_ctx = DomProxy.time_plot.getContext('2d')
+      fourier_ctx = DomProxy.fourier_plot.getContext('2d')
+      DomProxy.svg_src.addEventListener('change', () => {
+        DomProxy.svg_input_radio.checked = true
+        reinit()
+      })
+      DomProxy.input_func.addEventListener('change', () => {
+        DomProxy.func_input_radio.checked = true
+        reinit()
+      })
+      DomProxy.t_start.addEventListener('change', (e) => STATE.set_t_start(e.target.value))
+      DomProxy.t_end.addEventListener('change', (e) => STATE.set_t_end(e.target.value))
+      DomProxy.t_rate.addEventListener('change', (e) => STATE.set_t_rate(e.target.value))
+      DomProxy.num_series.addEventListener('change', reinit)
+      DomProxy.t.addEventListener('change', update_t)
+      DomProxy.delta_t.addEventListener('change', reinit)
+      DomProxy.use_suggested.addEventListener('click', set_zoom_to_suggested)
+      for (let el of document.querySelectorAll("input[type=radio]")) {
+        el.addEventListener('change', reinit)
+      }
+      DomProxy.file_input.addEventListener('change', () => {
+        DomProxy.file_input_radio.checked = true // Doesn't trigger event listener?
+        reinit()
+      })
+      DomProxy.follow.addEventListener('change', (e) => FOLLOW = e.target.checked)
+      DomProxy.reset.addEventListener('click', reset_t)
+      DomProxy.pause.addEventListener('click', stop)
+      DomProxy.play.addEventListener('click', play)
+      DomProxy.zoom_text.addEventListener('change', (e) => DomProxy.zoom.value = e.target.value)
+      DomProxy.zoom.addEventListener('input', (e) => DomProxy.zoom_text.value = e.target.value)
+      DomProxy.graph_x.addEventListener('change', (e) => CENTER_X = parseInt(e.target.value))
+      DomProxy.graph_y.addEventListener('change', (e) => CENTER_Y = parseInt(e.target.value))
+      DomProxy.tail_len.addEventListener('change', (e) => HISTORY_LEN = e.target.value)
+      DomProxy.time_plot.addEventListener('wheel', handle_wheel)
+      DomProxy.time_plot.addEventListener('pointermove', handle_pointermove)
+      DomProxy.fourier_plot.addEventListener('wheel', handle_wheel)
+      DomProxy.fourier_plot.addEventListener('pointermove', handle_pointermove)
+      reinit()
+    }
+    document.addEventListener("DOMContentLoaded", onload)
+  </script>
+</head>
+<body>
+  <h2>Input</h2>
+  <div> 
+    <label>
+      <input type="radio" id="func_input_radio" name="input_radio" value="func" checked>
+      <label> Formula <input type="text" id="input_func" value="20 * e ^ (-i * t) + 20"> </label>
+    </label>
+  </div> 
+  <div>
+    <label>
+      <input type="radio" id="svg_input_radio" name="input_radio" value="svg">
+      <label> SVG URL <input type="text" id="svg_src" value=""> </label>
+    </label>
+  </div>
+  <div>
+    <label>
+      <input type="radio" id="file_input_radio" name="input_radio" value="file">
+      SVG File
+      <input type="file" id="file_input" accept=".svg">
+    </label>
+  </div>
+  <br/>
+  <div>
+    Changing these fields for SVGs may cause strange behavior
+    <br />
+    <span style="border-style: solid; border-color: red"> 
+      <label> T Start <input type="text" id="t_start" value="0"> </label>
+      <label> T End <input type="text" id="t_end" value="2*pi"> </label>
+    </span>
+    <label> T Rate (change per second) <input type="text" id="t_rate" value="2*pi"> </label>
+    <label> T <input type="text" id="t" value="-1"> </label>
+  </div>
+  <br/>
+  <div>
+    <label> Tail Length <input type="text" id="tail_len" value="100"> </label>
+    <label> Zoom
+      <input type="range" id="zoom" min="-10" max="10" value="1">
+      <input type="text" id="zoom_text" value="1">
+      <input type="button" id="use_suggested" value="Use suggested">  
+    </label>
+    <label> Graph X <input type="text" id="graph_x" value="0"> </label>
+    <label> Graph Y <input type="text" id="graph_y" value="0"> </label>
+    <label> Follow plot <input type="checkbox" id="follow"> </label>
+    <input type="button" id="reset" value="Reset">
+    <input type="button" id="pause" value="Pause">
+    <input type="button" id="play" value="Play">
+  </div>
+  <div id="svg_div" style="display: none">
+    <h2> SVG </h2>
+    <span id="svg_container"></span>
+  </div>
+  <h2>Function</h2>
+  <div>
+    <span>
+      <canvas id="time_plot" width="800px" height="400px"></canvas>
+    </span>
+  </div>
+  <h2>Fourier</h2>
+  <label> Num sines <input type="text" id="num_series" value="101"> </label>
+  <label> Integral accuracy <input type="text" id="delta_t" value=".001"> </label>
+  <br />
+  <canvas id="fourier_plot" width="800px" height="400px"></canvas>
+  <br />
+  <div id="param_container" style="width: 800px; overflow: scroll; white-space: nowrap">
+  </div>
+</body>
+</html>
