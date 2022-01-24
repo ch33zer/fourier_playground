@@ -91,6 +91,7 @@
         DomProxy.t_end.value = this.t_end
         DomProxy.t_rate.value = this.t_rate
         this.estimate_fourier()
+        set_zoom_to_suggested()
         this.state = "DONE"
 
       }
@@ -362,6 +363,12 @@
       DomProxy.t_rate.addEventListener('change', (e) => STATE.set_t_rate(e.target.value))
       DomProxy.num_series.addEventListener('change', reinit)
       DomProxy.t.addEventListener('change', update_t)
+      DomProxy.reinit.addEventListener('click', (e) => {
+        DomProxy.t_start.value = "0"
+        DomProxy.t_end.value = "2*pi"
+        DomProxy.t_rate.value = "2*pi"
+        reinit()
+      })
       DomProxy.delta_t.addEventListener('change', reinit)
       DomProxy.use_suggested.addEventListener('click', set_zoom_to_suggested)
       for (let el of document.querySelectorAll("input[type=radio]")) {
@@ -420,6 +427,10 @@
     </span>
     <label> T Rate (change per second) <input type="text" id="t_rate" value="2*pi"> </label>
     <label> T <input type="text" id="t" value="-1"> </label>
+    <input type="button" id="reset" value="Reset T to 0">
+    <input type="button" id="pause" value="Pause">
+    <input type="button" id="play" value="Play">
+    <input type="button" id="reinit" value="Reinitialize bounds (resets animation)">
   </div>
   <br/>
   <div>
@@ -432,9 +443,6 @@
     <label> Graph X <input type="text" id="graph_x" value="0"> </label>
     <label> Graph Y <input type="text" id="graph_y" value="0"> </label>
     <label> Follow plot <input type="checkbox" id="follow"> </label>
-    <input type="button" id="reset" value="Reset">
-    <input type="button" id="pause" value="Pause">
-    <input type="button" id="play" value="Play">
   </div>
   <div id="svg_div" style="display: none">
     <h2> SVG </h2>
