@@ -17,6 +17,7 @@
         this.t_start = undefined
         this.t_end = undefined
         this.t_rate = undefined
+        this.original_len = undefined
         this.num_series = undefined
         this.delta_t = undefined
         this.max = undefined
@@ -87,6 +88,7 @@
         this.t_start = 0
         this.t_end = total_length
         this.t_rate = this.t_end / 10
+        this.original_len = total_length
         DomProxy.t_start.value = this.t_start
         DomProxy.t_end.value = this.t_end
         DomProxy.t_rate.value = this.t_rate
@@ -133,18 +135,23 @@
         return this.scaled_t
       }
       i() {
-        return (this.scaled_t - this.t_start) / (this.t_end - this.t_start)
+        let length = this.t_end - this.t_start;
+        if (this.input_mode == "SVG") {
+          length = this.original_len
+        }
+        return (this.scaled_t - this.t_start) / (length)
       }
       current_fourier_approx() {
         let sum = math.complex()
         var expr = math.compile("c * e ^ (2 * pi * i * n * t)")
+        var ret = []
         for (let i = 0; i < this.num_series; i++) {
           var n = i - Math.floor(this.num_series / 2)
           var c = this.fourier_params.get(n)
           var val = expr.evaluate({c: c, n: n, t: this.i()})
-          sum = math.add(sum, val)
+          ret.push({n: n, val: val})
         }
-        return sum
+        return ret
       }
       current_point(t) {
         if (t === undefined) {
@@ -233,8 +240,16 @@
         }
         time_plot_ctx.setTransform(1, 0, 0, 1, 0, 0)
         draw_graph(fourier_ctx, WIDTH, HEIGHT, ZOOM, VIEW_WIDTH, VIEW_HEIGHT)
-        var fourier = STATE.current_fourier_approx()
-        append_point(fourier_tail, fourier)
+        var fourier_fragments = STATE.current_fourier_approx()
+        var sum = math.complex()
+        fourier_ctx.beginPath()
+        fourier_ctx.moveTo(-CENTER_X, -CENTER_Y)
+        for (var frag of fourier_fragments) {
+          sum = math.add(sum, frag.val)
+          fourier_ctx.lineTo(math.re(sum) - CENTER_X, math.im(sum) - CENTER_Y)
+        }
+        fourier_ctx.stroke()
+        append_point(fourier_tail, sum)
         for (let el of fourier_tail) {
           fourier_ctx.beginPath()
           fourier_ctx.arc(math.re(el) - CENTER_X, math.im(el) - CENTER_Y, DOT_RAD, 0, Math.PI * 2)
