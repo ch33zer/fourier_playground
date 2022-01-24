@@ -80,9 +80,9 @@
           if (el instanceof SVGGeometryElement) {
             var len = el.getTotalLength()
             var start = total_length
-            var end = start + len
-            this.svg_pieces.push({start: start, end: end, el: el})
             total_length += len
+            var end = total_length
+            this.svg_pieces.push({start: start, end: end, el: el})
           }
         }
         this.t_start = 0
@@ -124,7 +124,8 @@
         } else {
           let real_time_advance = new_time - this.real_t
           this.real_t = new_time
-          this.scaled_t += (real_time_advance) * this.t_rate
+          var direction = Math.sign(this.t_end - this.t_start)
+          this.scaled_t += (real_time_advance) * this.t_rate * direction
           while (this.scaled_t > this.t_end) {
             this.scaled_t -= this.t_end - this.t_start
           }
@@ -135,23 +136,43 @@
         return this.scaled_t
       }
       i() {
-        let length = this.t_end - this.t_start;
         if (this.input_mode == "SVG") {
-          length = this.original_len
+          return this.scaled_t / this.original_len
         }
-        return (this.scaled_t - this.t_start) / (length)
+        return (this.scaled_t - this.t_start) / this.t_end - this.t_start
       }
       current_fourier_approx() {
-        let sum = math.complex()
-        var expr = math.compile("c * e ^ (2 * pi * i * n * t)")
         var ret = []
-        for (let i = 0; i < this.num_series; i++) {
-          var n = i - Math.floor(this.num_series / 2)
+        var common_exponent_terms = 2 * Math.PI * this.i()
+        var gen = function(n) {
           var c = this.fourier_params.get(n)
-          var val = expr.evaluate({c: c, n: n, t: this.i()})
+          var exponent = common_exponent_terms * n
+          var exp = math.complex(Math.cos(exponent), Math.sin(exponent))
+          var val = math.multiply(c, exp)
           ret.push({n: n, val: val})
+        }.bind(this)
+        gen(0)
+        for (let i = 1; i <= (this.num_series - 1) / 2; i++) {
+          gen(i)
+          gen(-i)
         }
         return ret
+      }
+      find_svg_piece(t) {
+        var min = 0;
+        var max = this.svg_pieces.length - 1;
+        while (min <= max) {
+          var i = Math.floor((min + max) / 2)
+          var el = this.svg_pieces[i]
+          if (el.end <= t) {
+            min = i + 1
+          } else if (el.start > t) {
+            max = i - 1
+          } else {
+            return el
+          }
+        }
+        return null
       }
       current_point(t) {
         if (t === undefined) {
@@ -160,13 +181,20 @@
         if (this.input_mode == "FUNC")
           return math.complex(this.input_func.evaluate({t: t}))
         else {
-          for (let el of this.svg_pieces) {
-            if (t > el.end) {
-              continue
+          var found = null
+          if (this.svg_pieces.length > 3) {
+            found = this.find_svg_piece(t)
+          } else {
+            for (let el of this.svg_pieces) {
+              if (t >= el.end) {
+                continue
+              }
+              found = el
+              break;
             }
-            var point = el.el.getPointAtLength(t - el.start)
-            return math.complex(point.x, point.y)
           }
+          var point = found.el.getPointAtLength(t - found.start)
+          return math.complex(point.x, point.y)
         }
         console.log("Nothing matched in current_point!")
         debugger;
@@ -189,7 +217,7 @@
     }
     function append_point(history, point) {
       history.push(point)
-      while (history.length > HISTORY_LEN) {
+      while (history.length > Math.max(HISTORY_LEN, 1)) {
         history.shift()
       }
     }
@@ -203,6 +231,23 @@
       context.moveTo(-CENTER_X, -view_height/2)
       context.lineTo(-CENTER_X, view_height/2)
       context.stroke()
+    }
+    function draw_points(context, history, dot_rad) {
+      context.beginPath()
+      for (let el of history) {
+        var x = math.re(el) - CENTER_X
+        var y = math.im(el) - CENTER_Y
+        context.moveTo(x+dot_rad, y)
+        context.arc(x, y, dot_rad, 0, Math.PI * 2)
+      }
+      context.stroke()
+      var old_style = context.strokeStyle
+      var last = history[history.length - 1]
+      context.strokeStyle = "yellow"
+      context.beginPath()
+      context.arc(math.re(last) - CENTER_X, math.im(last) - CENTER_Y, dot_rad, 0, Math.PI * 2)
+      context.stroke()
+      context.strokeStyle = old_style
     }
     let STATE;
     var time_plot_ctx;
@@ -231,14 +276,12 @@
           DomProxy.graph_x.value = CENTER_X
           DomProxy.graph_y.value = CENTER_Y
         }
+        time_plot_ctx.save()
         draw_graph(time_plot_ctx, WIDTH, HEIGHT, ZOOM, VIEW_WIDTH, VIEW_HEIGHT)
         append_point(time_tail, val)
-        for (let el of time_tail) {
-          time_plot_ctx.beginPath()
-          time_plot_ctx.arc(math.re(el) - CENTER_X, math.im(el) - CENTER_Y, DOT_RAD, 0, Math.PI * 2)
-          time_plot_ctx.stroke()
-        }
-        time_plot_ctx.setTransform(1, 0, 0, 1, 0, 0)
+        draw_points(time_plot_ctx, time_tail, DOT_RAD)
+        time_plot_ctx.restore()
+        fourier_ctx.save()
         draw_graph(fourier_ctx, WIDTH, HEIGHT, ZOOM, VIEW_WIDTH, VIEW_HEIGHT)
         var fourier_fragments = STATE.current_fourier_approx()
         var sum = math.complex()
@@ -250,12 +293,8 @@
         }
         fourier_ctx.stroke()
         append_point(fourier_tail, sum)
-        for (let el of fourier_tail) {
-          fourier_ctx.beginPath()
-          fourier_ctx.arc(math.re(el) - CENTER_X, math.im(el) - CENTER_Y, DOT_RAD, 0, Math.PI * 2)
-          fourier_ctx.stroke()
-        }
-        fourier_ctx.setTransform(1, 0, 0, 1, 0, 0)
+        draw_points(fourier_ctx, fourier_tail, DOT_RAD)
+        fourier_ctx.restore()
       }
       anim_frame = window.requestAnimationFrame(draw_plot)
     }
@@ -415,26 +454,33 @@
   <h1>Fourier Playground</h1>
   <h2>About</h2>
     <p>
-      Welcome to the Fourier Playground! This page serves as a place for you to visualize functions and their <a href="https://www.youtube.com/watch?v=r6sGWTCMz2k">Fourier Transforms</a> (video by <a href="https://www.youtube.com/channel/UCYO_jab_esuFRV4b17AJtAw">3Blue1Brow</a>, who inspired this tool). You can input any function (as a function of <code>t</code>), or upload an SVG, and the path traced by that function/SVG will be used as the input function. The Fourier Transform of any input function is an approximation of the function represented using only the addition of rotating vectors. You can control how many vectors with the Num frequencies input. You can control the range over which T will increase (T Start to T End), and the rate of increase through that range. If you don't see anything in the plots below you may be at the wrong zoom level, try using the <code>Use Suggested</code> button to reset the zoom to an appropriate value. Be aware that the SVG URL feature depends on the server hosting the URL allowing loads via CORS, so it is unreliable. It's better to just download any SVG you want to test then upload it. This page is entirely local, it doesn't communicate with any server except to load any SVG URLs you enter. Source code is available <a href="https://github.com/ch33zer/fourier_playground">here</a>. This makes use of <a href="https://mathjs.org/"><code>math.js</code></a>
+      Welcome to the Fourier Playground! This page serves as a place for you to visualize functions and their <a href="https://www.youtube.com/watch?v=r6sGWTCMz2k" target="_blank">Fourier Transforms</a> (video by <a href="https://www.youtube.com/channel/UCYO_jab_esuFRV4b17AJtAw" target="_blank">3Blue1Brow</a>, who inspired this tool). You can input any function (as a function of <code>t</code>), or upload an SVG, and the path traced by that function/SVG will be used as the input function. The Fourier Transform of any input function is an approximation of the function represented using only the addition of rotating vectors. You can control how many vectors with the Num frequencies input. You can control the range over which T will increase (T Start to T End), and the rate of increase through that range. If you don't see anything in the plots below you may be at the wrong zoom level, try using the <code>Use Suggested</code> button to reset the zoom to an appropriate value. Be aware that the SVG URL feature depends on the server hosting the URL allowing loads via CORS, so it is unreliable. It's better to just download any SVG you want to test then upload it. This page is entirely local, it doesn't communicate with any server except to load any SVG URLs you enter. Source code is available <a href="https://github.com/ch33zer/fourier_playground" target="_blank">here</a>. This makes use of <a href="https://mathjs.org/" target="_blank"><code>math.js</code></a>
     </p>
+
+    <p>Here are a few interesting functions you can plug in:</p>
+    <ul>
+      <li><code>20 * (sin(2*t) + i cos(t))</code></li>
+      <li><code>20 * round(t)(1 + i)</code></li>
+    </ul>
 
     <p>Here are a few SVGs for you to try out:</p>
     <ul>
-      <li>Dodecahedron: <a href="https://commons.wikimedia.org/wiki/Category:SVG_files#/media/File:Dodecahedron_schlegel.svg">https://commons.wikimedia.org/wiki/Category:SVG_files#/media/File:Dodecahedron_schlegel.svg</a></li>
-      <li>Fourier portrait: <a href="https://www.dropbox.com/s/tnim0el257lfzom/Biocinematics_Fourier_Vector.svg?dl=0">https://www.dropbox.com/s/tnim0el257lfzom/Biocinematics_Fourier_Vector.svg</a></li>
-      <li>SVG Repository: <a href="https://dev.w3.org/SVG/tools/svgweb/samples/svg-files/">https://dev.w3.org/SVG/tools/svgweb/samples/svg-files/</a></li>
+      <li>Dodecahedron: <a href="https://commons.wikimedia.org/wiki/Category:SVG_files#/media/File:Dodecahedron_schlegel.svg" target="_blank">https://commons.wikimedia.org/wiki/Category:SVG_files#/media/File:Dodecahedron_schlegel.svg</a></li>
+      <li>Fourier portrait: <a href="https://www.dropbox.com/s/tnim0el257lfzom/Biocinematics_Fourier_Vector.svg?dl=0" target="_blank">https://www.dropbox.com/s/tnim0el257lfzom/Biocinematics_Fourier_Vector.svg</a></li>
+      <li>SVG Repository: <a href="https://dev.w3.org/SVG/tools/svgweb/samples/svg-files/" target="_blank">https://dev.w3.org/SVG/tools/svgweb/samples/svg-files/</a></li>
     </ul>
 
     <p>Similar tools:</p>
     <ul>
-      <li><a href="https://www.myfourierepicycles.com/">myfourierepicycles.com</a></li>
-      <li><a href="https://www.reddit.com/r/3Blue1Brown/comments/cvpdn7/make_your_own_fourier_circle_drawings/">Fourier of provided drawings</a></li>
+      <li><a href="https://www.myfourierepicycles.com/" target="_blank">myfourierepicycles.com</a></li>
+      <li><a href="https://www.reddit.com/r/3Blue1Brown/comments/cvpdn7/make_your_own_fourier_circle_drawings/" target="_blank">Fourier of provided drawings</a></li>
     </ul>
   <h2>Input</h2>
   <div> 
     <label>
       <input type="radio" id="func_input_radio" name="input_radio" value="func" checked>
       <label> Formula <input type="text" id="input_func" value="20 * e ^ (-i * t) + 20"> </label>
+      <a href="https://mathjs.org/docs/expressions/syntax.html" target="_blank">Syntax</a>
     </label>
   </div> 
   <div>
