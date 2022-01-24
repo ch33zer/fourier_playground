@@ -397,6 +397,24 @@
   </script>
 </head>
 <body>
+  <h1>Fourier Playground</h1>
+  <h2>About</h2>
+    <p>
+      Welcome to the Fourier Playground! This page serves as a place for you to visualize functions and their <a href="https://www.youtube.com/watch?v=r6sGWTCMz2k">Fourier Transforms</a> (video by <a href="https://www.youtube.com/channel/UCYO_jab_esuFRV4b17AJtAw">3Blue1Brow</a>, who inspired this tool). You can input any function (as a function of <code>t</code>), or upload an SVG, and the path traced by that function/SVG will be used as the input function. The Fourier Transform of any input function is an approximation of the function represented using only the addition of rotating vectors. You can control how many vectors with the Num frequencies input. You can control the range over which T will increase (T Start to T End), and the rate of increase through that range. If you don't see anything in the plots below you may be at the wrong zoom level, try using the <code>Use Suggested</code> button to reset the zoom to an appropriate value. Be aware that the SVG URL feature depends on the server hosting the URL allowing loads via CORS, so it is unreliable. It's better to just download any SVG you want to test then upload it. This page is entirely local, it doesn't communicate with any server except to load any SVG URLs you enter. Source code is available <a href="https://github.com/ch33zer/fourier_playground">here</a>. This makes use of <a href="https://mathjs.org/"><code>math.js</code></a>
+    </p>
+
+    <p>Here are a few SVGs for you to try out:</p>
+    <ul>
+      <li>Dodecahedron: <a href="https://commons.wikimedia.org/wiki/Category:SVG_files#/media/File:Dodecahedron_schlegel.svg">https://commons.wikimedia.org/wiki/Category:SVG_files#/media/File:Dodecahedron_schlegel.svg</a></li>
+      <li>Fourier portrait: <a href="https://www.dropbox.com/s/tnim0el257lfzom/Biocinematics_Fourier_Vector.svg?dl=0">https://www.dropbox.com/s/tnim0el257lfzom/Biocinematics_Fourier_Vector.svg</a></li>
+      <li>SVG Repository: <a href="https://dev.w3.org/SVG/tools/svgweb/samples/svg-files/">https://dev.w3.org/SVG/tools/svgweb/samples/svg-files/</a></li>
+    </ul>
+
+    <p>Similar tools:</p>
+    <ul>
+      <li><a href="https://www.myfourierepicycles.com/">myfourierepicycles.com</a></li>
+      <li><a href="https://www.reddit.com/r/3Blue1Brown/comments/cvpdn7/make_your_own_fourier_circle_drawings/">Fourier of provided drawings</a></li>
+    </ul>
   <h2>Input</h2>
   <div> 
     <label>
@@ -455,7 +473,7 @@
     </span>
   </div>
   <h2>Fourier</h2>
-  <label> Num sines <input type="text" id="num_series" value="101"> </label>
+  <label> Num frequencies <input type="text" id="num_series" value="101"> </label>
   <label> Integral accuracy <input type="text" id="delta_t" value=".001"> </label>
   <br />
   <canvas id="fourier_plot" width="800px" height="400px" style="touch-action: none"></canvas>
